@@ -7,3 +7,11 @@ class AuthenticationBackend(object):
 
     def has_perm(self, user, perm, obj=None):
         return user_has_perm(user, perm, obj)
+
+    def authenticate(self, username=None, password=None):
+        # We don't authenticate
+        return None
+
+    def get_user(self, user_id):
+        # We don't authenticate
+        return None
