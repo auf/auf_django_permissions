@@ -1,92 +1,138 @@
+# encoding: utf-8
+
 from collections import defaultdict
+
+
+class Predicate(object):
+    """
+    Wrapper pour une fonction ``f(user, obj, cls)``.
+
+    Le paramètre ``user`` est l'utilisateur pour lequel la permission est testée.
+
+    Si le prédicat est testé sur un seul objet, cet objet est passé dans
+    le paramètre ``obj`` et le paramètre ``cls`` est ``None``. Inversement,
+    si le prédicat sert à filtrer un queryset, le modèle du queryset est
+    passé dans le paramètre ``cls`` et le paramètre ``obj`` est ``None``.
+
+    La fonction peut retourner un booléen ou un objet ``Q``. Un booléen
+    indique si le test a passé ou pas. Un objet ``Q`` indique les filtres à
+    appliquer pour ne garder que les objets qui passent le test. Si un objet
+    ``Q`` est retourné lors d'un test sur un seul objet, le test retournera
+    un booléen indiquant si l'objet satisfait au filtre.
+
+    Les prédicats peuvent être combinés à l'aide des opérateurs booléens
+    ``&``, ``|`` et ``~``.
+    """
+
+    def __init__(self, func_or_value):
+        """
+        On peut initialiser un prédicat avec une fonction ayant la signature
+        ``f(user, obj, cls)`` ou avec une valeur constante.
+        """
+        if callable(func_or_value):
+            self.func = func_or_value
+        else:
+            self.func = lambda user, obj, cls: func_or_value
+
+    def __call__(self, user, obj=None, cls=None):
+        """
+        Appelle la fonction encapsulée.
+        """
+        return self.func(user, obj, cls)
+
+    def __and__(self, other):
+        def func(user, obj, cls):
+            my_result = self(user, obj, cls)
+            if my_result is False:
+                return False
+            other_result = other(user, obj, cls)
+            if my_result is True:
+                return other_result
+            elif other_result is True:
+                return my_result
+            else:
+                return my_result & other_result
+        return Predicate(func)
+
+    def __or__(self, other):
+        def func(user, obj, cls):
+            my_result = self(user, obj, cls)
+            if my_result is True:
+                return True
+            other_result = other(user, obj, cls)
+            if my_result is False:
+                return other_result
+            elif other_result is False:
+                return my_result
+            else:
+                return my_result | other_result
+        return Predicate(func)
+
+    def __invert__(self):
+        def func(user, obj, cls):
+            result = self(user, obj, cls)
+            if isinstance(result, bool):
+                return not result
+            else:
+                return ~result
+        return Predicate(func)
+
 
 class Rules(object):
 
-    def __init__(self):
-        self.tests = defaultdict(list)
-        self.qs = defaultdict(list)
-        self.test_qs = defaultdict(list)
+    def __init__(self, allow_default=None, deny_default=None):
+        self.allow_rules = defaultdict(lambda: allow_default or Predicate(False))
+        self.deny_rules = defaultdict(lambda: deny_default or Predicate(False))
 
-    def clear(self):
-        self.tests.clear()
-        self.qs.clear()
-        self.test_qs.clear()
+    def allow(self, perm, cls, predicate):
+        if not isinstance(predicate, Predicate):
+            raise TypeError("the third argument to allow() must be a Predicate")
+        self.allow_rules[(perm, cls)] |= predicate
 
-    def add(self, perm, cls=None, test=None, q=None):
-        if test:
-            self.tests[(perm, cls)].append(test)
-        if q:
-            self.qs[(perm, cls)].append(q)
-            if not test:
-                self.test_qs[(perm, cls)].append(q)
+    def deny(self, perm, cls, predicate):
+        if not isinstance(predicate, Predicate):
+            raise TypeError("the third argument to deny() must be a Predicate")
+        self.deny_rules[(perm, cls)] |= predicate
 
-    def test(self, user, perm, obj=None):
-        if obj is None:
-            tests = self.tests[(perm, None)]
-            return any(test(user) for test in tests)
+    def predicate_for_perm(self, perm, cls):
+        return self.allow_rules[(perm, cls)] & ~self.deny_rules[(perm, cls)]
 
-        cls = type(obj)
-        tests = self.tests[(perm, cls)]
-        if any(test(user, obj) for test in tests):
-            return True
-        qs = self.test_qs[(perm, cls)]
-        if qs:
-            q = reduce(lambda x, y: x | y, (q(user) for q in qs))
-            if cls._default_manager.filter(q).filter(pk=obj.pk).exists():
-                return True
-        return False
+    def user_has_perm(self, user, perm, obj):
+        result = self.predicate_for_perm(perm, obj.__class__)(user, obj)
+        if isinstance(result, bool):
+            return result
+        else:
+            return obj._default_manager.filter(pk=obj.pk).filter(result).exists()
 
-    def get_q(self, user, perm, cls):
-        qs = self.qs[(perm, cls)]
-        return reduce(lambda x, y: x | y, (q(user) for q in qs)) if qs else None
+    def filter_queryset(self, user, perm, queryset):
+        result = self.predicate_for_perm(perm, queryset.model)(user, cls=queryset.model)
+        if result is True:
+            return queryset
+        elif result is False:
+            return queryset.none()
+        else:
+            return queryset.filter(result)
 
-allow_rules = Rules()
-deny_rules = Rules()
+    def clear():
+        self.allow_rules.clear()
+        self.deny_rules.clear()
 
-def allow(perm, cls=None, test=None, q=None):
-    allow_rules.add(perm, cls, test, q)
 
-def deny(perm, cls=None, test=None, q=None):
-    deny_rules.add(perm, cls, test, q)
+class AuthenticationBackend(object):
+    supports_anonymous_user = True
+    supports_inactive_user = True
+    supports_object_permissions = True
+    rules = None
 
-def user_has_perm(user, perm, obj=None):
-    return not deny_rules.test(user, perm, obj) and allow_rules.test(user, perm, obj)
+    def has_perm(self, user, perm, obj=None):
+        if self.rules is None or obj is None:
+            return False
+        return self.rules.user_has_perm(user, perm, obj)
 
-def filter(user, perm, queryset):
-    deny_q = deny_rules.get_q(user, perm, queryset.model)
-    if deny_q:
-        queryset = queryset.exclude(deny_q)
-    allow_q = allow_rules.get_q(user, perm, queryset.model)
-    if allow_q:
-        queryset = queryset.filter(allow_q)
-    else:
-        queryset = queryset.none()
-    return queryset
+    def authenticate(self, username=None, password=None):
+        # We don't authenticate
+        return None
 
-def clear_rules():
-    allow_rules.clear()
-    deny_rules.clear()
-
-def autodiscover():
-    """
-    Auto-discover INSTALLED_APPS permissions.py modules and fail silently when
-    not present. This forces an import on them to register permission rules.
-    This is freely adapted from django.contrib.admin.autodiscover()
-    """
-
-    import copy
-    from django.conf import settings
-    from django.utils.importlib import import_module
-    from django.utils.module_loading import module_has_submodule
-
-    for app in settings.INSTALLED_APPS:
-        mod = import_module(app)
-        # Attempt to import the app's permissions module.
-        try:
-            import_module('%s.permissions' % app)
-        except:
-            # Decide whether to bubble up this error. If the app just
-            # doesn't have a permissions module, we can ignore the error
-            # attempting to import it, otherwise we want it to bubble up.
-            if module_has_submodule(mod, 'permissions'):
-                raise
+    def get_user(self, user_id):
+        # We don't authenticate
+        return None
