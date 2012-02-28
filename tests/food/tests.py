@@ -36,6 +36,17 @@ class FoodTestCase(unittest.TestCase):
 
 class RulesTestCase(FoodTestCase):
 
+    def test_global_perms(self):
+        self.rules.allow_global('sing', Predicate(lambda user: user is self.alice))
+        self.assertTrue(self.alice.has_perm('sing'))
+        self.assertFalse(self.alice.has_perm('dance'))
+
+    def test_global_deny(self):
+        self.rules.allow_global('eat', Predicate(True))
+        self.rules.deny_global('eat', Predicate(lambda user: user is self.bob))
+        self.assertTrue(self.alice.has_perm('eat'))
+        self.assertFalse(self.bob.has_perm('eat'))
+
     def test_object_perms(self):
         self.rules.allow('eat', Food, ~is_allergic)
         self.assertTrue(self.alice.has_perm('eat', self.apple))

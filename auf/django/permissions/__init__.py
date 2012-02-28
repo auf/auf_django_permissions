@@ -38,7 +38,10 @@ class Predicate(object):
         """
         Appelle la fonction encapsulée.
         """
-        return self.func(user, obj, cls)
+        if self.func.func_code.co_argcount == 1:
+            return self.func(user)
+        else:
+            return self.func(user, obj, cls)
 
     def __and__(self, other):
         def func(user, obj, cls):
@@ -94,11 +97,18 @@ class Rules(object):
             raise TypeError("the third argument to deny() must be a Predicate")
         self.deny_rules[(perm, cls)] |= predicate
 
+    def allow_global(self, perm, predicate):
+        self.allow(perm, None, predicate)
+
+    def deny_global(self, perm, predicate):
+        self.deny(perm, None, predicate)
+
     def predicate_for_perm(self, perm, cls):
         return self.allow_rules[(perm, cls)] & ~self.deny_rules[(perm, cls)]
 
     def user_has_perm(self, user, perm, obj):
-        result = self.predicate_for_perm(perm, obj.__class__)(user, obj)
+        cls = None if obj is None else obj.__class__
+        result = self.predicate_for_perm(perm, cls)(user, obj)
         if isinstance(result, bool):
             return result
         else:
@@ -125,7 +135,7 @@ class AuthenticationBackend(object):
     rules = None
 
     def has_perm(self, user, perm, obj=None):
-        if self.rules is None or obj is None:
+        if self.rules is None:
             return False
         return self.rules.user_has_perm(user, perm, obj)
 
