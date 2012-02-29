@@ -5,6 +5,9 @@ from collections import defaultdict
 from django.conf import settings
 from django.utils.importlib import import_module
 
+from auf.django.permissions.models import GlobalGroupPermission
+
+
 class Predicate(object):
     """
     Wrapper pour une fonction ``f(user, obj, cls)``.
@@ -134,12 +137,30 @@ class AuthenticationBackend(object):
     supports_anonymous_user = True
     supports_inactive_user = True
     supports_object_permissions = True
-    rules = None
 
     def has_perm(self, user, perm, obj=None):
-        if self.rules is None:
+        if not user.is_active:
             return False
-        return self.rules.user_has_perm(user, perm, obj)
+        if obj is None and perm in self.get_all_permissions(user):
+            return True
+        return get_rules().user_has_perm(user, perm, obj)
+
+    def get_group_permissions(self, user, obj=None):
+        if user.is_anonymous() or obj is not None:
+            return set()
+        if not hasattr(user, '_auf_global_group_perm_cache'):
+            user._auf_global_group_perm_cache = set(
+                p.codename for p in GlobalGroupPermission.objects.filter(group__user=user)
+            )
+        return user._auf_global_group_perm_cache
+
+    def get_all_permissions(self, user, obj=None):
+        if user.is_anonymous() or obj is not None:
+            return set()
+        if not hasattr(user, '_auf_global_user_perm_cache'):
+            user._auf_global_user_perm_cache = set(p.codename for p in user.global_permissions.all())
+            user._auf_global_user_perm_cache.update(self.get_group_permissions(user))
+        return user._auf_global_user_perm_cache
 
     def authenticate(self, username=None, password=None):
         # We don't authenticate
