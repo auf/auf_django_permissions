@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 
+from django.conf import settings
+from django.utils.importlib import import_module
 
 class Predicate(object):
     """
@@ -123,7 +125,7 @@ class Rules(object):
         else:
             return queryset.filter(result)
 
-    def clear():
+    def clear(self):
         self.allow_rules.clear()
         self.deny_rules.clear()
 
@@ -146,3 +148,14 @@ class AuthenticationBackend(object):
     def get_user(self, user_id):
         # We don't authenticate
         return None
+
+_rules = None
+def get_rules():
+    global _rules
+    if _rules is None:
+        if not hasattr(settings, 'AUF_PERMISSIONS_RULES'):
+            raise ImproperlyConfigured('Vous devez configurer la variable AUF_PERMISSIONS_RULES')
+        module_name, dot, attr = settings.AUF_PERMISSIONS_RULES.rpartition('.')
+        module = import_module(module_name)
+        _rules = getattr(module, attr)
+    return _rules

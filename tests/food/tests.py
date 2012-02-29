@@ -7,9 +7,10 @@ from django.template import Template, RequestContext
 from django.utils import unittest
 from django.utils.text import normalize_newlines
 
-from auf.django.permissions import Rules, Predicate, AuthenticationBackend
+from auf.django.permissions import Predicate, AuthenticationBackend
 
 from tests.food.models import Food
+from tests.permissions import rules
 
 @Predicate
 def is_allergic(user, obj, cls):
@@ -24,8 +25,7 @@ class FoodTestCase(unittest.TestCase):
         self.apple = Food.objects.create(name='apple')
         self.banana = Food.objects.create(name='banana')
         self.banana.allergic_users.add(self.alice)
-        self.rules = Rules()
-        AuthenticationBackend.rules = self.rules
+        rules.clear()
 
     def tearDown(self):
         self.alice.delete()
@@ -37,38 +37,38 @@ class FoodTestCase(unittest.TestCase):
 class RulesTestCase(FoodTestCase):
 
     def test_global_perms(self):
-        self.rules.allow_global('sing', Predicate(lambda user: user is self.alice))
+        rules.allow_global('sing', Predicate(lambda user: user is self.alice))
         self.assertTrue(self.alice.has_perm('sing'))
         self.assertFalse(self.alice.has_perm('dance'))
 
     def test_global_deny(self):
-        self.rules.allow_global('eat', Predicate(True))
-        self.rules.deny_global('eat', Predicate(lambda user: user is self.bob))
+        rules.allow_global('eat', Predicate(True))
+        rules.deny_global('eat', Predicate(lambda user: user is self.bob))
         self.assertTrue(self.alice.has_perm('eat'))
         self.assertFalse(self.bob.has_perm('eat'))
 
     def test_object_perms(self):
-        self.rules.allow('eat', Food, ~is_allergic)
+        rules.allow('eat', Food, ~is_allergic)
         self.assertTrue(self.alice.has_perm('eat', self.apple))
         self.assertFalse(self.alice.has_perm('eat', self.banana))
 
     def test_object_deny(self):
-        self.rules.allow('eat', Food, Predicate(True))
-        self.rules.deny('eat', Food, is_allergic)
+        rules.allow('eat', Food, Predicate(True))
+        rules.deny('eat', Food, is_allergic)
         self.assertTrue(self.alice.has_perm('eat', self.apple))
         self.assertFalse(self.alice.has_perm('eat', self.banana))
 
     def test_no_rules(self):
         self.assertFalse(self.alice.has_perm('climb'))
-        self.rules.allow('eat', Food, Predicate(True))
+        rules.allow('eat', Food, Predicate(True))
         self.assertTrue(self.alice.has_perm('eat', self.apple))
         self.assertFalse(self.alice.has_perm('eat', self.bob))
 
     def test_q_rules(self):
-        self.rules.allow('eat', Food, ~is_allergic)
-        self.assertListEqual(list(self.rules.filter_queryset(self.alice, 'eat', Food.objects.all())),
+        rules.allow('eat', Food, ~is_allergic)
+        self.assertListEqual(list(rules.filter_queryset(self.alice, 'eat', Food.objects.all())),
                              [self.apple])
-        self.assertListEqual(list(self.rules.filter_queryset(self.bob, 'eat', Food.objects.all())),
+        self.assertListEqual(list(rules.filter_queryset(self.bob, 'eat', Food.objects.all())),
                              [self.apple, self.banana])
         self.assertTrue(self.alice.has_perm('eat', self.apple))
         self.assertFalse(self.alice.has_perm('eat', self.banana))
@@ -78,8 +78,8 @@ class TemplateTagsTestCase(FoodTestCase):
 
     def setUp(self):
         FoodTestCase.setUp(self)
-        self.rules.allow('eat', Food, ~is_allergic)
-        self.rules.allow('throw', Food, Predicate(True))
+        rules.allow('eat', Food, ~is_allergic)
+        rules.allow('throw', Food, Predicate(True))
 
     def test_ifhasperm(self):
         template = Template("""{% load permissions %}

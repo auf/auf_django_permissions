@@ -23,3 +23,5 @@ TEMPLATE_LOADERS=(
 TEMPLATE_CONTEXT_PROCESSORS=(
     'django.core.context_processors.request',
 )
+
+AUF_PERMISSIONS_RULES = 'tests.permissions.rules'
