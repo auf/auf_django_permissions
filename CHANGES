@@ -1,3 +1,20 @@
+0.3 (2012-03-13)
+================
+
+* Ajouté des vérification de type sur les méthodes Rules.allow() et Rules.deny()
+
+* Ajouté un manager spécifique aux permissions globales avec les méthodes
+  add_permission(), remove_permission(), get_permissions()
+
+* Ajouté la classe GuardedModelAdmin qui est un ModelAdmin gérant les row-level
+  permissions
+
+* Ajouté le constructeur make_global_permissions_form() qui permet d'ajouter la
+  gestion des permissions globales aux formulaires des utilisateurs et des
+  groupes.
+
+* Commencé une documentation
+
 0.2 (2012-03-01)
 ================
 

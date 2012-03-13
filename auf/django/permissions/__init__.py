@@ -3,6 +3,7 @@
 from collections import defaultdict
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.importlib import import_module
 
 from auf.django.permissions.models import GlobalGroupPermission
@@ -12,7 +13,8 @@ class Predicate(object):
     """
     Wrapper pour une fonction ``f(user, obj, cls)``.
 
-    Le paramètre ``user`` est l'utilisateur pour lequel la permission est testée.
+    Le paramètre ``user`` est l'utilisateur pour lequel la permission est
+    testée.
 
     Si le prédicat est testé sur un seul objet, cet objet est passé dans
     le paramètre ``obj`` et le paramètre ``cls`` est ``None``. Inversement,
@@ -89,15 +91,27 @@ class Predicate(object):
 class Rules(object):
 
     def __init__(self, allow_default=None, deny_default=None):
-        self.allow_rules = defaultdict(lambda: allow_default or Predicate(False))
+        self.allow_rules = defaultdict(
+            lambda: allow_default or Predicate(lambda user: user.is_superuser)
+        )
         self.deny_rules = defaultdict(lambda: deny_default or Predicate(False))
 
     def allow(self, perm, cls, predicate):
+        if not isinstance(perm, basestring):
+            raise TypeError(
+                "the first argument to allow() must be a string"
+            )
         if not isinstance(predicate, Predicate):
-            raise TypeError("the third argument to allow() must be a Predicate")
+            raise TypeError(
+                "the third argument to allow() must be a Predicate"
+            )
         self.allow_rules[(perm, cls)] |= predicate
 
     def deny(self, perm, cls, predicate):
+        if not isinstance(perm, basestring):
+            raise TypeError(
+                "the first argument to deny() must be a string"
+            )
         if not isinstance(predicate, Predicate):
             raise TypeError("the third argument to deny() must be a Predicate")
         self.deny_rules[(perm, cls)] |= predicate
@@ -117,10 +131,14 @@ class Rules(object):
         if isinstance(result, bool):
             return result
         else:
-            return obj._default_manager.filter(pk=obj.pk).filter(result).exists()
+            return obj._default_manager \
+                    .filter(pk=obj.pk) \
+                    .filter(result) \
+                    .exists()
 
     def filter_queryset(self, user, perm, queryset):
-        result = self.predicate_for_perm(perm, queryset.model)(user, cls=queryset.model)
+        predicate = self.predicate_for_perm(perm, queryset.model)
+        result = predicate(user, cls=queryset.model)
         if result is True:
             return queryset
         elif result is False:
@@ -150,7 +168,8 @@ class AuthenticationBackend(object):
             return set()
         if not hasattr(user, '_auf_global_group_perm_cache'):
             user._auf_global_group_perm_cache = set(
-                p.codename for p in GlobalGroupPermission.objects.filter(group__user=user)
+                p.codename
+                for p in GlobalGroupPermission.objects.filter(group__user=user)
             )
         return user._auf_global_group_perm_cache
 
@@ -158,8 +177,12 @@ class AuthenticationBackend(object):
         if user.is_anonymous() or obj is not None:
             return set()
         if not hasattr(user, '_auf_global_user_perm_cache'):
-            user._auf_global_user_perm_cache = set(p.codename for p in user.global_permissions.all())
-            user._auf_global_user_perm_cache.update(self.get_group_permissions(user))
+            user._auf_global_user_perm_cache = set(
+                p.codename for p in user.global_permissions.all()
+            )
+            user._auf_global_user_perm_cache.update(
+                self.get_group_permissions(user)
+            )
         return user._auf_global_user_perm_cache
 
     def authenticate(self, username=None, password=None):
@@ -170,13 +193,17 @@ class AuthenticationBackend(object):
         # We don't authenticate
         return None
 
-_rules = None
+
 def get_rules():
     global _rules
     if _rules is None:
         if not hasattr(settings, 'AUF_PERMISSIONS_RULES'):
-            raise ImproperlyConfigured('Vous devez configurer la variable AUF_PERMISSIONS_RULES')
+            raise ImproperlyConfigured(
+                'Vous devez configurer la variable AUF_PERMISSIONS_RULES'
+            )
         module_name, dot, attr = settings.AUF_PERMISSIONS_RULES.rpartition('.')
         module = import_module(module_name)
         _rules = getattr(module, attr)
     return _rules
+
+_rules = None

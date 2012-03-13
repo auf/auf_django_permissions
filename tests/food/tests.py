@@ -5,12 +5,12 @@ from django.db.models import Q
 from django.http import HttpRequest
 from django.template import Template, RequestContext
 from django.utils import unittest
-from django.utils.text import normalize_newlines
 
-from auf.django.permissions import Predicate, AuthenticationBackend
+from auf.django.permissions import Predicate
 
 from tests.food.models import Food
 from tests.permissions import rules
+
 
 @Predicate
 def is_allergic(user, obj, cls):
@@ -66,10 +66,14 @@ class RulesTestCase(FoodTestCase):
 
     def test_q_rules(self):
         rules.allow('eat', Food, ~is_allergic)
-        self.assertListEqual(list(rules.filter_queryset(self.alice, 'eat', Food.objects.all())),
-                             [self.apple])
-        self.assertListEqual(list(rules.filter_queryset(self.bob, 'eat', Food.objects.all())),
-                             [self.apple, self.banana])
+        self.assertListEqual(
+            list(rules.filter_queryset(self.alice, 'eat', Food.objects.all())),
+            [self.apple]
+        )
+        self.assertListEqual(
+            list(rules.filter_queryset(self.bob, 'eat', Food.objects.all())),
+            [self.apple, self.banana]
+        )
         self.assertTrue(self.alice.has_perm('eat', self.apple))
         self.assertFalse(self.alice.has_perm('eat', self.banana))
 
@@ -122,5 +126,3 @@ Smoke {{ fruit.name }}: {{ fruit_perms.smoke|yesno }}
                                      "Smoke banana: no"
                                  ])
                                 )
-
-
