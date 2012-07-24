@@ -1,3 +1,11 @@
+0.4 (2012-07-23)
+================
+
+* API complètement différent: abandon des règles et des prédicats. On utilise
+  plutôt des rôles pour donner des permissions.
+
+* Ajout de la méthod with_perm() aux querysets Django.
+
 0.3 (2012-03-13)
 ================
 

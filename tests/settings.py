@@ -9,8 +9,7 @@ INSTALLED_APPS = (
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'auf.django.permissions',
-    'tests.food',
-    'tests.simple_tests'
+    'tests.simpletests',
 )
 
 AUTHENTICATION_BACKENDS = (
@@ -25,4 +24,8 @@ TEMPLATE_CONTEXT_PROCESSORS = (
     'django.core.context_processors.request',
 )
 
-AUF_PERMISSIONS_RULES = 'tests.permissions.rules'
+ROLE_PROVIDERS = (
+    'tests.simpletests.role_provider',
+)
+
+SECRET_KEY = 'not-very-secret'

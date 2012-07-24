@@ -1,155 +1,210 @@
 # encoding: utf-8
 
-from collections import defaultdict
+import itertools
+import re
+import urlparse
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from django.contrib.auth.views import redirect_to_login
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied
+from django.db.models import Q
+from django.shortcuts import render
 from django.utils.importlib import import_module
 
-from auf.django.permissions.models import GlobalGroupPermission
 
+# Roles and role providers
 
-class Predicate(object):
+class Role(object):
     """
-    Wrapper pour une fonction ``f(user, obj, cls)``.
+    Base class for roles.
 
-    Le paramètre ``user`` est l'utilisateur pour lequel la permission est
-    testée.
-
-    Si le prédicat est testé sur un seul objet, cet objet est passé dans
-    le paramètre ``obj`` et le paramètre ``cls`` est ``None``. Inversement,
-    si le prédicat sert à filtrer un queryset, le modèle du queryset est
-    passé dans le paramètre ``cls`` et le paramètre ``obj`` est ``None``.
-
-    La fonction peut retourner un booléen ou un objet ``Q``. Un booléen
-    indique si le test a passé ou pas. Un objet ``Q`` indique les filtres à
-    appliquer pour ne garder que les objets qui passent le test. Si un objet
-    ``Q`` est retourné lors d'un test sur un seul objet, le test retournera
-    un booléen indiquant si l'objet satisfait au filtre.
-
-    Les prédicats peuvent être combinés à l'aide des opérateurs booléens
-    ``&``, ``|`` et ``~``.
+    Doesn't give any permission.
     """
 
-    def __init__(self, func_or_value):
+    def has_perm(self, perm):
         """
-        On peut initialiser un prédicat avec une fonction ayant la signature
-        ``f(user, obj, cls)`` ou avec une valeur constante.
-        """
-        if callable(func_or_value):
-            self.func = func_or_value
-        else:
-            self.func = lambda user, obj, cls: func_or_value
+        Checks if this role gives the permission ``perm``.
 
-    def __call__(self, user, obj=None, cls=None):
+        Returns True if it does, False if it doesn't.
         """
-        Appelle la fonction encapsulée.
+        return False
+
+    def get_filter_for_perm(self, perm, model):
         """
-        if self.func.func_code.co_argcount == 1:
-            return self.func(user)
-        else:
-            return self.func(user, obj, cls)
+        Returns a filter for instances of ``model`` for which this roles
+        grants permission ``perm``.
 
-    def __and__(self, other):
-        def func(user, obj, cls):
-            my_result = self(user, obj, cls)
-            if my_result is False:
-                return False
-            other_result = other(user, obj, cls)
-            if my_result is True:
-                return other_result
-            elif other_result is True:
-                return my_result
-            else:
-                return my_result & other_result
-        return Predicate(func)
+        If the permission is granted on all instances of the model, the
+        method returns True.
 
-    def __or__(self, other):
-        def func(user, obj, cls):
-            my_result = self(user, obj, cls)
-            if my_result is True:
+        If the permission is granted only on some instances of the model, the
+        method returns a Q object that selects only those instances.
+
+        If the permission is granted on no instances of the model, the
+        method return False.
+        """
+        return False
+
+
+def get_role_providers():
+    """
+    Gathers the role providers configured in the settings.
+    """
+    global _role_providers
+    if _role_providers is None:
+        _role_providers = []
+        for path in getattr(settings, 'ROLE_PROVIDERS', []):
+            module_path, sep, provider_name = path.rpartition('.')
+            try:
+                module = import_module(module_path)
+            except ImportError, e:
+                raise ImproperlyConfigured(
+                    "Error importing role provider %s: %s" % path, e
+                )
+            try:
+                provider = getattr(module, provider_name)
+            except AttributeError:
+                raise ImproperlyConfigured(
+                    'Module "%s" does not define a role provider named "%s"' %
+                    (module_path, provider_name)
+                )
+            _role_providers.append(provider)
+    return _role_providers
+_role_providers = None
+
+
+def get_roles(user):
+    """
+    Returns the roles given to a user.
+    """
+    return list(itertools.chain.from_iterable(
+        p(user) for p in get_role_providers()
+    ))
+
+
+# Permission checking
+
+def user_has_perm(user, perm, obj=None):
+    """
+    Checks whether a user has the given permission.
+    """
+    roles = get_roles(user)
+    if obj is None:
+        return any(role.has_perm(perm) for role in roles)
+    else:
+        for role in roles:
+            q = role.get_filter_for_perm(perm, type(obj))
+            if q is True or (isinstance(q, Q) and qeval(obj, q)):
                 return True
-            other_result = other(user, obj, cls)
-            if my_result is False:
-                return other_result
-            elif other_result is False:
-                return my_result
-            else:
-                return my_result | other_result
-        return Predicate(func)
-
-    def __invert__(self):
-        def func(user, obj, cls):
-            result = self(user, obj, cls)
-            if isinstance(result, bool):
-                return not result
-            else:
-                return ~result
-        return Predicate(func)
+        return False
 
 
-class Rules(object):
-
-    def __init__(self, allow_default=None, deny_default=None):
-        self.allow_rules = defaultdict(
-            lambda: allow_default or Predicate(lambda user: user.is_superuser)
-        )
-        self.deny_rules = defaultdict(lambda: deny_default or Predicate(False))
-
-    def allow(self, perm, cls, predicate):
-        if not isinstance(perm, basestring):
-            raise TypeError(
-                "the first argument to allow() must be a string"
-            )
-        if not isinstance(predicate, Predicate):
-            raise TypeError(
-                "the third argument to allow() must be a Predicate"
-            )
-        self.allow_rules[(perm, cls)] |= predicate
-
-    def deny(self, perm, cls, predicate):
-        if not isinstance(perm, basestring):
-            raise TypeError(
-                "the first argument to deny() must be a string"
-            )
-        if not isinstance(predicate, Predicate):
-            raise TypeError("the third argument to deny() must be a Predicate")
-        self.deny_rules[(perm, cls)] |= predicate
-
-    def allow_global(self, perm, predicate):
-        self.allow(perm, None, predicate)
-
-    def deny_global(self, perm, predicate):
-        self.deny(perm, None, predicate)
-
-    def predicate_for_perm(self, perm, cls):
-        return self.allow_rules[(perm, cls)] & ~self.deny_rules[(perm, cls)]
-
-    def user_has_perm(self, user, perm, obj):
-        cls = None if obj is None else obj.__class__
-        result = self.predicate_for_perm(perm, cls)(user, obj)
-        if isinstance(result, bool):
-            return result
-        else:
-            return obj._default_manager \
-                    .filter(pk=obj.pk) \
-                    .filter(result) \
-                    .exists()
-
-    def filter_queryset(self, user, perm, queryset):
-        predicate = self.predicate_for_perm(perm, queryset.model)
-        result = predicate(user, cls=queryset.model)
-        if result is True:
+def queryset_with_perm(queryset, user, perm):
+    """
+    Filters ``queryset``, leaving only objects on which ``user`` has the
+    permission ``perm``.
+    """
+    roles = get_roles(user)
+    query = None
+    for role in roles:
+        q = role.get_filter_for_perm(perm, queryset.model)
+        if q is True:
             return queryset
-        elif result is False:
-            return queryset.none()
+        elif q is not False:
+            if query:
+                query |= q
+            else:
+                query = q
+    if query:
+        return queryset.filter(query)
+    else:
+        return queryset.none()
+
+
+def qeval(obj, q):
+    """
+    Evaluates a Q object on an instance of a model.
+    """
+
+    # Evaluate all children
+    for child in q.children:
+        if isinstance(child, Q):
+            result = qeval(child)
         else:
-            return queryset.filter(result)
+            filter, value = child
+            bits = filter.split('__')
+            path = bits[:-1]
+            lookup = bits[-1]
+            for attr in path:
+                obj = getattr(obj, attr)
+            if lookup == 'exact':
+                result = obj == value
+            elif lookup == 'iexact':
+                result = obj.lower() == value.lower()
+            elif lookup == 'contains':
+                result = value in obj
+            elif lookup == 'icontains':
+                result = value.lower() in obj.lower()
+            elif lookup == 'in':
+                result = obj in value
+            elif lookup == 'gt':
+                result = obj > value
+            elif lookup == 'gte':
+                result = obj >= value
+            elif lookup == 'lt':
+                result = obj < value
+            elif lookup == 'lte':
+                result = obj <= value
+            elif lookup == 'startswith':
+                result = obj.startswith(value)
+            elif lookup == 'istartswith':
+                result = obj.lower().istartswith(value.lower())
+            elif lookup == 'endswith':
+                result = obj.lower().iendswith(value.lower())
+            elif lookup == 'range':
+                result = value[0] <= obj <= value[1]
+            elif lookup == 'year':
+                result = obj.year == value
+            elif lookup == 'month':
+                result = obj.month == value
+            elif lookup == 'day':
+                result = obj.day == value
+            elif lookup == 'week_day':
+                result = (obj.weekday() + 1) % 7 + 1 == value
+            elif lookup == 'isnull':
+                result = (obj is None) if value else (obj is not None)
+            elif lookup == 'search':
+                raise NotImplementedError(
+                    'qeval does not implement "__search"'
+                )
+            elif lookup == 'regex':
+                result = bool(re.search(value, obj))
+            elif lookup == 'iregex':
+                result = bool(re.search(value, obj, re.I))
+            else:
+                obj = getattr(obj, lookup)
+                result = obj == value
 
-    def clear(self):
-        self.allow_rules.clear()
-        self.deny_rules.clear()
+        # See if we can shortcut
+        if result and q.connector == Q.OR:
+            return True
+        if not result and q.connector == Q.AND:
+            return False
 
+    # We could'nt shortcut
+    if q.connector == Q.OR:
+        result = False
+    if q.connector == Q.AND:
+        result = True
+
+    # Negate if necessary
+    if q.negated:
+        return not result
+    else:
+        return result
+
+
+# Authentication backend
 
 class AuthenticationBackend(object):
     supports_anonymous_user = True
@@ -157,33 +212,10 @@ class AuthenticationBackend(object):
     supports_object_permissions = True
 
     def has_perm(self, user, perm, obj=None):
-        if not user.is_active:
-            return False
-        if obj is None and perm in self.get_all_permissions(user):
-            return True
-        return get_rules().user_has_perm(user, perm, obj)
+        return user_has_perm(user, perm, obj)
 
-    def get_group_permissions(self, user, obj=None):
-        if user.is_anonymous() or obj is not None:
-            return set()
-        if not hasattr(user, '_auf_global_group_perm_cache'):
-            user._auf_global_group_perm_cache = set(
-                p.codename
-                for p in GlobalGroupPermission.objects.filter(group__user=user)
-            )
-        return user._auf_global_group_perm_cache
-
-    def get_all_permissions(self, user, obj=None):
-        if user.is_anonymous() or obj is not None:
-            return set()
-        if not hasattr(user, '_auf_global_user_perm_cache'):
-            user._auf_global_user_perm_cache = set(
-                p.codename for p in user.global_permissions.all()
-            )
-            user._auf_global_user_perm_cache.update(
-                self.get_group_permissions(user)
-            )
-        return user._auf_global_user_perm_cache
+    def has_module_perms(self, user, package_name):
+        return user_has_perm(user, package_name)
 
     def authenticate(self, username=None, password=None):
         # We don't authenticate
@@ -194,16 +226,32 @@ class AuthenticationBackend(object):
         return None
 
 
-def get_rules():
-    global _rules
-    if _rules is None:
-        if not hasattr(settings, 'AUF_PERMISSIONS_RULES'):
-            raise ImproperlyConfigured(
-                'Vous devez configurer la variable AUF_PERMISSIONS_RULES'
-            )
-        module_name, dot, attr = settings.AUF_PERMISSIONS_RULES.rpartition('.')
-        module = import_module(module_name)
-        _rules = getattr(module, attr)
-    return _rules
+# View protection and PermissionDenied management
 
-_rules = None
+def require_permission(user, perm, obj=None):
+    if not user.has_perm(perm, obj):
+        raise PermissionDenied
+
+
+class PermissionDeniedMiddleware(object):
+
+    def process_exception(self, request, exception):
+        if isinstance(exception, PermissionDenied):
+            if request.user.is_anonymous():
+
+                # Code de redirection venant de
+                # django.contrib.auth.decorators.permission_required()
+                path = request.build_absolute_uri()
+                login_url = settings.LOGIN_URL
+                # If the login url is the same scheme and net location then
+                # just use the path as the "next" url.
+                login_scheme, login_netloc = urlparse.urlparse(login_url)[:2]
+                current_scheme, current_netloc = urlparse.urlparse(path)[:2]
+                if ((not login_scheme or login_scheme == current_scheme) and
+                    (not login_netloc or login_netloc == current_netloc)):
+                    path = request.get_full_path()
+                return redirect_to_login(path, login_url, 'next')
+            else:
+                return render(request, '403.html')
+        else:
+            return None

@@ -1,6 +1,7 @@
 *.egg-info
 *.pyc
 /.installed.cfg
+/.coverage
 /bin
 /build
 /develop-eggs

@@ -10,8 +10,8 @@ Documentation d'auf.django.permissions
    :maxdepth: 2
 
    installation
+   roles
    utilisation
-
 
 
 Indices and tables

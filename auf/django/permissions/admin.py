@@ -1,6 +1,5 @@
 # encoding: utf-8
 
-from auf.django.permissions import get_rules
 from django.contrib.admin import ModelAdmin
 
 
@@ -14,8 +13,5 @@ class GuardedModelAdmin(ModelAdmin):
                     .has_change_permission(request, obj)
 
     def queryset(self, request):
-        return get_rules().filter_queryset(
-            request.user,
-            'change',
-            super(GuardedModelAdmin, self).queryset(request)
-        )
+        return super(GuardedModelAdmin, self).queryset(request) \
+                .with_perm(request.user, 'change')

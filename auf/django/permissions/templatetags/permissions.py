@@ -69,12 +69,15 @@ def ifhasperm(parser, token):
         nodelist_false = template.NodeList()
     return IfHasPermNode(perm, obj, nodelist_true, nodelist_false)
 
+
 @register.tag
 def withperms(parser, token):
     bits = token.split_contents()[1:]
     if len(bits) != 3 or bits[1] != 'as':
-        raise template.TemplateSyntaxError("%r tag takes two arguments separated by 'as'" %
-                                           token.contents.split()[0])
+        raise template.TemplateSyntaxError(
+            "%r tag takes two arguments separated by 'as'" %
+            token.contents.split()[0]
+        )
     obj = bits[0]
     var = bits[2]
     nodelist = parser.parse(('endwithperms',))
