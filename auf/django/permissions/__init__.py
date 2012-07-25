@@ -104,6 +104,10 @@ def queryset_with_perm(queryset, user, perm):
     Filters ``queryset``, leaving only objects on which ``user`` has the
     permission ``perm``.
     """
+    # Special case: superusers have all permissions on all objects.
+    if user.is_superuser:
+        return queryset
+
     roles = get_roles(user)
     query = None
     for role in roles:
