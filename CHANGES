@@ -1,3 +1,8 @@
+0.5 (2012-07-26)
+================
+
+* Ne pas filtrer le queryset lorsqu'on a affaire à un superuser.
+
 0.4 (2012-07-23)
 ================
 

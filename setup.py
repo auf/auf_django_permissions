@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 name = 'auf.django.permissions'
-version = '0.4'
+version = '0.5'
 
 setup(name=name,
       version=version,
