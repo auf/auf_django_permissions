@@ -1,3 +1,15 @@
+0.7 (2013-01-16)
+================
+
+* Bugfix dans qeval()
+
+0.6 (2012-08-24)
+================
+
+* Bugfix dans qeval()
+
+* Retourner un code HTTP 403 pour les pages de déni de permission.
+
 0.5 (2012-07-26)
 ================
 
