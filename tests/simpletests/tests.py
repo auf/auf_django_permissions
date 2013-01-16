@@ -14,9 +14,12 @@ class HasPermTestCase(TransactionTestCase):
         self.superman = User.objects.create(
             username='superman', is_superuser=True
         )
-        self.carrot = Food.objects.create(is_meat=False)
-        self.celery = Food.objects.create(is_meat=False)
-        self.steak = Food.objects.create(is_meat=True)
+        self.carrot = Food.objects.create(
+            owner=self.alice, name=u'carrot', is_meat=False
+        )
+        self.celery = Food.objects.create(name=u'celery', is_meat=False)
+        self.steak = Food.objects.create(name=u'steak', is_meat=True)
+        self.soup = Food.objects.create(name=u'canned soup', is_meat=False)
 
     def test_global_permissions(self):
         self.assertTrue(self.bob.has_perm('eat'))
@@ -28,11 +31,14 @@ class HasPermTestCase(TransactionTestCase):
         self.assertFalse(self.alice.has_perm('throw', self.carrot))
         self.assertFalse(self.alice.has_perm('eat', self.steak))
         self.assertTrue(self.alice.has_perm('buy', self.steak))
+        self.assertFalse(self.alice.has_perm('give', self.carrot))
+        self.assertTrue(self.alice.has_perm('paint', self.carrot))
+        self.assertFalse(self.alice.has_perm('paint', self.steak))
 
     def test_queryset_filtering(self):
         self.assertEqual(
             set(Food.objects.with_perm(self.alice, 'eat')),
-            set([self.carrot, self.celery])
+            set([self.carrot, self.celery, self.soup])
         )
         self.assertEqual(
             set(Food.objects.with_perm(self.alice, 'throw')),

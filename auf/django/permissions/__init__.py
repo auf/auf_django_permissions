@@ -8,7 +8,8 @@ from django.conf import settings
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db.models import Q
-from django.shortcuts import render
+from django.http import HttpResponseForbidden
+from django.template.loader import render_to_string
 from django.utils.importlib import import_module
 
 
@@ -129,77 +130,76 @@ def qeval(obj, q):
     """
     Evaluates a Q object on an instance of a model.
     """
-
     # Evaluate all children
     for child in q.children:
         if isinstance(child, Q):
-            result = qeval(child)
+            result = qeval(obj, child)
         else:
             filter, value = child
             bits = filter.split('__')
             path = bits[:-1]
             lookup = bits[-1]
+            obj_value = obj
             for attr in path:
-                obj = getattr(obj, attr)
-            if lookup == 'exact':
-                result = obj == value
+                if obj_value is None:
+                    break
+                obj_value = getattr(obj_value, attr)
+            if obj_value is None:
+                result = value is None or (lookup == 'isnull' and value)
+            elif lookup == 'exact':
+                result = obj_value == value
             elif lookup == 'iexact':
-                result = obj.lower() == value.lower()
+                result = obj_value.lower() == value.lower()
             elif lookup == 'contains':
-                result = value in obj
+                result = value in obj_value
             elif lookup == 'icontains':
-                result = value.lower() in obj.lower()
+                result = value.lower() in obj_value.lower()
             elif lookup == 'in':
-                result = obj in value
+                result = obj_value in value
             elif lookup == 'gt':
-                result = obj > value
+                result = obj_value > value
             elif lookup == 'gte':
-                result = obj >= value
+                result = obj_value >= value
             elif lookup == 'lt':
-                result = obj < value
+                result = obj_value < value
             elif lookup == 'lte':
-                result = obj <= value
+                result = obj_value <= value
             elif lookup == 'startswith':
-                result = obj.startswith(value)
+                result = obj_value.startswith(value)
             elif lookup == 'istartswith':
-                result = obj.lower().istartswith(value.lower())
+                result = obj_value.lower().istartswith(value.lower())
             elif lookup == 'endswith':
-                result = obj.lower().iendswith(value.lower())
+                result = obj_value.lower().iendswith(value.lower())
             elif lookup == 'range':
-                result = value[0] <= obj <= value[1]
+                result = value[0] <= obj_value <= value[1]
             elif lookup == 'year':
-                result = obj.year == value
+                result = obj_value.year == value
             elif lookup == 'month':
-                result = obj.month == value
+                result = obj_value.month == value
             elif lookup == 'day':
-                result = obj.day == value
+                result = obj_value.day == value
             elif lookup == 'week_day':
-                result = (obj.weekday() + 1) % 7 + 1 == value
+                result = (obj_value.weekday() + 1) % 7 + 1 == value
             elif lookup == 'isnull':
-                result = (obj is None) if value else (obj is not None)
+                # We took care of the case where obj_value is None earlier,
+                # so at this point, obj_value is not None
+                result = not value
             elif lookup == 'search':
                 raise NotImplementedError(
                     'qeval does not implement "__search"'
                 )
             elif lookup == 'regex':
-                result = bool(re.search(value, obj))
+                result = bool(re.search(value, obj_value))
             elif lookup == 'iregex':
-                result = bool(re.search(value, obj, re.I))
+                result = bool(re.search(value, obj_value, re.I))
             else:
-                obj = getattr(obj, lookup)
-                result = obj == value
+                obj_value = getattr(obj_value, lookup)
+                result = obj_value == value
 
         # See if we can shortcut
-        if result and q.connector == Q.OR:
-            return True
-        if not result and q.connector == Q.AND:
-            return False
-
-    # We could'nt shortcut
-    if q.connector == Q.OR:
-        result = False
-    if q.connector == Q.AND:
-        result = True
+        if (result and q.connector == Q.OR) \
+           or (not result and q.connector == Q.AND):
+            break
 
     # Negate if necessary
     if q.negated:
@@ -256,6 +256,6 @@ class PermissionDeniedMiddleware(object):
                     path = request.get_full_path()
                 return redirect_to_login(path, login_url, 'next')
             else:
-                return render(request, '403.html')
+                return HttpResponseForbidden(render_to_string('403.html'))
         else:
             return None
