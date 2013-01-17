@@ -3,7 +3,7 @@ from __future__ import absolute_import
 from auf.django.permissions import Role
 from django.db.models import Q
 
-from tests.simpletests.models import Food
+from tests.simpletests.models import Food, Recipe
 
 
 def role_provider(user):
@@ -32,6 +32,9 @@ class VegetarianRole(Role):
                 return Q(is_meat=True) | Q(name__contains='canned')
             elif perm == 'paint':
                 return Q(owner__username__startswith='a')
+        elif model is Recipe:
+            if perm == 'eat':
+                return ~Q(ingredients__is_meat=True)
         return False
 
 

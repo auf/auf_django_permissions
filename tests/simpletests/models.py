@@ -9,3 +9,11 @@ class Food(models.Model):
 
     def __unicode__(self):
         return self.name
+
+
+class Recipe(models.Model):
+    name = models.CharField(max_length=255)
+    ingredients = models.ManyToManyField(Food)
+
+    def __unicode__(self):
+        return self.name

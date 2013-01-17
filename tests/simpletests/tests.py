@@ -3,7 +3,7 @@ from __future__ import absolute_import
 from django.contrib.auth.models import User
 from django.test import TransactionTestCase
 
-from tests.simpletests.models import Food
+from tests.simpletests.models import Food, Recipe
 
 
 class HasPermTestCase(TransactionTestCase):
@@ -20,6 +20,14 @@ class HasPermTestCase(TransactionTestCase):
         self.celery = Food.objects.create(name=u'celery', is_meat=False)
         self.steak = Food.objects.create(name=u'steak', is_meat=True)
         self.soup = Food.objects.create(name=u'canned soup', is_meat=False)
+        self.vegetable_soup = Recipe.objects.create(
+            name=u'vegetable soup'
+        )
+        self.vegetable_soup.ingredients = [self.carrot, self.celery]
+        self.beef_soup = Recipe.objects.create(
+            name=u'beef soup'
+        )
+        self.beef_soup.ingredients = [self.carrot, self.celery, self.steak]
 
     def test_global_permissions(self):
         self.assertTrue(self.bob.has_perm('eat'))
@@ -34,6 +42,8 @@ class HasPermTestCase(TransactionTestCase):
         self.assertFalse(self.alice.has_perm('give', self.carrot))
         self.assertTrue(self.alice.has_perm('paint', self.carrot))
         self.assertFalse(self.alice.has_perm('paint', self.steak))
+        self.assertTrue(self.alice.has_perm('eat', self.vegetable_soup))
+        self.assertFalse(self.alice.has_perm('eat', self.beef_soup))
 
     def test_queryset_filtering(self):
         self.assertEqual(
