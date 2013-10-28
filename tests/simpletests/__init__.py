@@ -40,5 +40,5 @@ class VegetarianRole(Role):
 
 class HippieRole(Role):
 
-    def has_perm(self, perm):
+    def has_perm(self, perm, obj=None):
         return perm in ('eat', 'pray', 'love')

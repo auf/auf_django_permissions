@@ -22,7 +22,7 @@ class Role(object):
     Doesn't give any permission.
     """
 
-    def has_perm(self, perm):
+    def has_perm(self, perm, obj=None):
         """
         Checks if this role gives the permission ``perm``.
 
@@ -90,14 +90,14 @@ def user_has_perm(user, perm, obj=None):
     Checks whether a user has the given permission.
     """
     roles = get_roles(user)
-    if obj is None:
-        return any(role.has_perm(perm) for role in roles)
-    else:
+    if any(role.has_perm(perm, obj) for role in roles):
+        return True
+    elif obj is not None:
         for role in roles:
             q = role.get_filter_for_perm(perm, type(obj))
             if q is True or (isinstance(q, Q) and qeval(obj, q)):
                 return True
-        return False
+    return False
 
 
 def queryset_with_perm(queryset, user, perm):
