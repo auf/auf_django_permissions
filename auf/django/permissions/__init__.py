@@ -10,7 +10,10 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db.models import Q, Manager
 from django.http import HttpResponseForbidden
 from django.template.loader import render_to_string
-from django.utils.importlib import import_module
+try:
+    from importlib import import_module
+except ImportError:  # python 2.6
+    from django.utils.importlib import import_module
 
 
 # Roles and role providers
